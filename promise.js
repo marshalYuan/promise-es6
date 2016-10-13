@@ -1,162 +1,167 @@
-const PENDING = undefined
+const PENDING = 0
 const FULFILLED = 1
 const REJECTED = 2
 
+const curry = (func, arg1) => (arg2) => func(arg1, arg2)
+
 const isFunction = (obj) =>  'function' === typeof obj
 
-const isArray = (obj) => Object.prototype.toString.call(obj) === "[object Array]"
+const isIterable = (obj) => obj && typeof iterable.length === 'number'
 
-const isThenable = (obj) => obj && typeof obj['then'] == 'function'
+const isThenable = (obj) => obj && typeof obj['then'] === 'function'
 
-function transition(status,value){
-	let promise = this
-	if(promise._status !== PENDING) return;
-	// 所以的执行都是异步调用，保证then是先执行的
-	setTimeout(() => {
-		promise._status = status
-		publish.call(promise,value)
-	}, 0)
-}
+const setImmediate = (func) => setTimeout(func, 0)
 
-function publish(val) {
-	var promise = this,
-    	fn,
-    	st = promise._status === FULFILLED,
-    	queue = promise[st ? '_resolves' : '_rejects'];
-        
-    while(fn = queue.shift()) {
-        val = fn.call(promise, val) || val;
+const getThen = (value) => {
+    var type = typeof value;
+    var then;
+    if (value && (type === 'object' || type === 'function')) {
+        then = value.then;
+        if (typeof then === 'function') {
+            return then;
+        }
     }
-    promise[st ? '_value' : '_reason'] = val;
-    promise['_resolves'] = promise['_rejects'] = undefined;
+    return null;
 }
+
+const handle = (promise, handler) => {
+    //console.log('handler:', handler)
+    console.log('value:', promise._value)
+    const state = promise._state
+    const value = promise._value
+    const handlers = promise._handlers
+    
+    switch (state) {
+        case PENDING:
+            handlers ? handlers.push(handler): (promise._handlers = [handler])
+            return
+        case FULFILLED:
+            isFunction(handler.onFulfilled) && handler.onFulfilled(value)
+            return
+        case REJECTED:
+            isFunction(handler.onRejected) && handler.onRejected(value)
+            return
+    }
+}
+
+const resolve = (promise, result) => {
+    console.log("result:", result)
+    console.log("promise:", promise)
+    try {
+        const then = getThen(result)
+        if(then) {
+            doResolve(
+                (...args) => then.apply(result, ...args), 
+                curry(resolve, promise), 
+                curry(reject, promise))
+            return
+        }
+        fulfill(promise, result)
+    } catch (error) {
+        reject(promise, error)
+    }
+}
+
+const fulfill = (promise, result) => {
+    //console.log('fulfill', result)
+    promise._state = FULFILLED
+    promise._value = result
+    finale(promise)
+}
+
+const reject = (promise, reason) => {
+    promise._state = REJECTED
+    promise._value = reason
+    finale(promise)
+}
+
+const finale = (promise) => {
+    if (promise._handlers != null) {
+        promise._handlers.forEach(curry(handle, promise))
+        promise._handlers = null
+    }
+}
+
+
+
+function doResolve(fn, onFulfilled, onRejected) {
+    var done = false;
+    try {
+        fn((value) => {
+            if (done) {
+                return;
+            }
+            done = true;
+            setImmediate(() => onFulfilled(value))
+        }, (reason) => {
+            if (done) {
+                return;
+            }
+            done = true;
+            setImmediate(() => onRejected(reason))
+        });
+    } catch (e) {
+        if (done) {
+            return;
+        }
+        done = true;
+        setImmediate(() => onRejected(e))
+    }
+}
+
 
 
 class Promise {
     constructor(handler) {
         if (!isFunction(handler))
-	        throw new TypeError('You must pass a resolver function as the first argument to the promise constructor');
+	        throw new TypeError(`Promise resolver ${handler} is not a function`);
 
-        if(!(this instanceof Promise)) return new Promise(handler);
-
-        var promise = this;
-        this._value;
-        this._reason;
-        this._status = PENDING;
-        this._resolves = [];
-        this._rejects = [];
-                
-        handler((value) => transition.apply(this, [FULFILLED].concat([value]))
-            , (reason) => transition.apply(this, [REJECTED].concat([reason])))
-    }
-
-    static all(promises){
-        if (!isArray(promises)) {
-            throw new TypeError('You must pass an array to all.');
-        }
-        return Promise(function(resolve,reject){
-            var i = 0,
-                result = [],
-                len = promises.length,
-                count = len
-
-            function resolver(index) {
-                return function(value) {
-                    resolveAll(index, value);
-                };
-            }
-
-            function rejecter(reason){
-                reject(reason);
-            }
-
-            function resolveAll(index,value){
-                result[index] = value;
-                if( --count == 0){
-                    resolve(result)
-                }
-            }
-
-            for (; i < len; i++) {
-                promises[i].then(resolver(i),rejecter);
-            }
-        });
-    }
-
-    race(promises) {
-        if (!isArray(promises)) {
-            throw new TypeError('You must pass an array to race.');
-        }
-        return Promise(function(resolve,reject){
-            var i = 0,
-                len = promises.length;
-
-            function resolver(value) {
-                resolve(value);
-            }
-
-            function rejecter(reason){
-                reject(reason);
-            }
-
-            for (; i < len; i++) {
-                promises[i].then(resolver,rejecter);
-            }
-        });
-    }
-
-    static deferred() {
-        var defereded = {}
-        var promise = new Promise(function(resolve,reject){
-            deferred.resolve = resolve;
-            deferred.reject = reject;
-        });
-        return defereded;
-    }
-
-    static resolve(data) {
-        return new Promise((resolve)=>resolve(data))
+        this._state = PENDING
+        this._handlers = []
+        this._value = null
+        this.time = +new Date
+        
+        doResolve(handler, curry(resolve, this), curry(reject, this))
     }
 
 
-    static reject(reason) {
-        return new Promise((resolve, reject)=>reject(reason))
-    }
-
-    static delay(ms, val){
-        return Promise((resolve,reject) => setTimeout((val) => resolve(val), ms))
-    }
-
-    then(resolveHandler, rejectHandler) {
+    then(onFulfilled, onRejected) {
 	    // 每次返回一个promise，保证是可thenable的
-        return new Promise((resolve, reject) => {
-            const callback = (value) => {
-                const ret = isFunction(resolveHandler) && resolveHandler(value) || value;
-                if(isThenable(ret)){
-                    ret.then(function(value){
-                        resolve(value);
-                    },function(reason){
-                        reject(reason);
-                    });
-                }else{
-                    resolve(ret);
+        let res = null, self = this;
+        const nextPromise = new Promise((resolve, reject) => {
+            const _onFulfilled = (result) => {
+                if (isFunction(onFulfilled)) {
+                    try {
+                        res = onFulfilled(result);
+                        if (res === nextPromise) {
+                            return reject(new TypeError('The `promise` and `x` refer to the same object.'));
+                        }
+                        return resolve(res);
+                    } catch (e) {
+                        return reject(e);
+                    }
+                } else {
+                    return resolve(result);
                 }
             }
-
-            const errback = (reason) =>{
-                reason = isFunction(onRejected) && onRejected(reason) || reason;
-                reject(reason);
+            const _onRejected = (error) => {
+                if (isFunction(onRejected)) {
+                    try {
+                        res = onRejected(error);
+                        if (res === nextPromise) {
+                            return reject(new TypeError('The `promise` and `x` refer to the same object.'));
+                        }
+                        return resolve(res);
+                    } catch (ex) {
+                        return reject(ex);
+                    }
+                } else {
+                    return reject(error);
+                }
             }
-            console.log(this)
-            if(this._status === PENDING){
-                this._resolves.push(callback);
-                this._rejects.push(errback);
-            }else if(this._status === FULFILLED){ // 状态改变后的then操作，立刻执行
-                callback(this._value);
-            }else if(this._status === REJECTED){
-                errback(this._reason);
-            }
+            setImmediate(() => handle(this, {onFulfilled: _onFulfilled, onRejected: _onRejected}))
         });
+        return nextPromise;
     }
 
     catch(onRejected) {
@@ -172,8 +177,101 @@ class Promise {
                 (value) => Promise.resolve(f()).then(()=>value), 
                 (reason)=>Promise.reject(f()).then(()=>{throw reason}))
     }
+
+    static all(promises){
+        if (!isIterable(promises)) {
+            throw new TypeError('ArgumentsError: argument should be iterable.')
+        }
+        const len = promises.length
+        return len === 0 ? Promise.resolve([]) : new Promise(function(resolve, reject) {
+            const results = new Array(len)
+            let resolved = 0
+
+            for (let i = 0; i < len; i++) {
+                (function(i) {
+                    promise = promises[i]
+                    if (!(promise instanceof Promise)) {
+                        promise = Promise.resolve(promise)
+                    }
+                    promise.catch(function(reason) {
+                        reject(reason)
+                    });
+                    promise.then(function(value) {
+                        results[i] = value
+                        if (++resolved === len) {
+                            resolve(results)
+                        }
+                    })
+                })(i)
+            }
+        })
+    }
+
+    static race(promises) {
+        if (!isIterable(promises)) {
+            throw new TypeError('ArgumentsError: argument should be iterable.')
+        }
+        const deferred = Promise.deferred()
+        const len = promises.length
+        for (let i = 0; i < len; i++) {
+            promise = promises[i];
+            if (promise instanceof Promise) {
+                promise.then(function(value) {
+                    deferred.resolve(value);
+                }, function(reason) {
+                    deferred.reject(reason);
+                });
+            } else {
+                // if not promise, immediately resolve result promise
+                deferred.resolve(promise);
+                break;
+            }
+        }
+        return deferred.promise
+    }
+
+    static deferred() {
+        const deferred = {}
+        deferred.promise = new Promise((resolve,reject) => {
+            deferred.resolve = resolve
+            deferred.reject = reject
+        });
+        return deferred
+    }
+
+    static resolve(data) {
+        return new Promise((resolve) => resolve(data))
+    }
+
+
+    static reject(reason) {
+        return new Promise((resolve, reject) => reject(reason))
+    }
+
+    static delay(ms, ...args){
+        return new Promise((resolve, reject) => setTimeout(() => resolve(...args), ms))
+    }
 }
 
-module.exports = Promise
 
-new Promise((resolve, reject) => setTimeout(() => resolve(10), 2000)).then((value)=>console.log(value))
+var a = new Promise(function(resolve, reject) {
+    setTimeout(function() {
+        resolve('hello1')
+    }, 1000);
+}).then(function(value) {
+    console.log(value)
+    return new Promise(function(resolve, reject) {
+        setTimeout(function() {
+            console.log(value)
+            resolve('hello2')
+        }, 2000);
+    })
+})
+
+const b = (value)=> {
+    console.log('ssss', a)
+    console.log("111",value)
+}
+console.log("jjsjsj",a.then(b))
+
+module.exports = Promise
