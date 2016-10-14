@@ -25,8 +25,6 @@ const getThen = (value) => {
 }
 
 const handle = (promise, handler) => {
-    //console.log('handler:', handler)
-    console.log('value:', promise._value)
     const state = promise._state
     const value = promise._value
     const handlers = promise._handlers
@@ -45,13 +43,11 @@ const handle = (promise, handler) => {
 }
 
 const resolve = (promise, result) => {
-    console.log("result:", result)
-    console.log("promise:", promise)
     try {
         const then = getThen(result)
         if(then) {
             doResolve(
-                (...args) => then.apply(result, ...args), 
+                function(){ then.apply(result, arguments)}, 
                 curry(resolve, promise), 
                 curry(reject, promise))
             return
@@ -63,7 +59,6 @@ const resolve = (promise, result) => {
 }
 
 const fulfill = (promise, result) => {
-    //console.log('fulfill', result)
     promise._state = FULFILLED
     promise._value = result
     finale(promise)
@@ -126,7 +121,7 @@ class Promise {
 
 
     then(onFulfilled, onRejected) {
-	    // 每次返回一个promise，保证是可thenable的
+	    // 每次返回一个promise，保证是thenable的
         let res = null, self = this;
         const nextPromise = new Promise((resolve, reject) => {
             const _onFulfilled = (result) => {
@@ -253,25 +248,5 @@ class Promise {
     }
 }
 
-
-var a = new Promise(function(resolve, reject) {
-    setTimeout(function() {
-        resolve('hello1')
-    }, 1000);
-}).then(function(value) {
-    console.log(value)
-    return new Promise(function(resolve, reject) {
-        setTimeout(function() {
-            console.log(value)
-            resolve('hello2')
-        }, 2000);
-    })
-})
-
-const b = (value)=> {
-    console.log('ssss', a)
-    console.log("111",value)
-}
-console.log("jjsjsj",a.then(b))
 
 module.exports = Promise
