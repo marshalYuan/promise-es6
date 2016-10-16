@@ -31,7 +31,7 @@ const handle = (promise, handler) => {
     
     switch (state) {
         case PENDING:
-            handlers ? handlers.push(handler): (promise._handlers = [handler])
+            handlers.push(handler)
             return
         case FULFILLED:
             isFunction(handler.onFulfilled) && handler.onFulfilled(value)
@@ -47,7 +47,7 @@ const resolve = (promise, result) => {
         const then = getThen(result)
         if(then) {
             doResolve(
-                function(){ then.apply(result, arguments)}, 
+                (...args) => then.apply(result, args), 
                 curry(resolve, promise), 
                 curry(reject, promise))
             return
@@ -114,7 +114,6 @@ class Promise {
         this._state = PENDING
         this._handlers = []
         this._value = null
-        this.time = +new Date
         
         doResolve(handler, curry(resolve, this), curry(reject, this))
     }
